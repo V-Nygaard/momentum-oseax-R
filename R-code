@@ -1,0 +1,1057 @@
+#Laste-inn-kjernedata
+RI <- read.csv("RI.csv", header = TRUE) 
+RI$Date <- as.Date(RI$Date, "%d/%m/%Y")
+MC <- read.csv("MC.csv", header = TRUE) 
+MC$Date <- as.Date(MC$Date, "%d/%m/%Y")
+VO <- read.csv("VO.csv", header = TRUE) 
+VO$Date <- as.Date(VO$Date, "%d/%m/%Y")
+UP <- read.csv("UP.csv", header = TRUE) 
+UP$Date <- as.Date(UP$Date, "%d/%m/%Y")
+GICS <- read.csv("GICS.csv", header = TRUE)
+RI <- RI[, colnames(RI) %in%colnames(MC)]
+MC <- MC[, colnames(MC) %in%colnames(RI)]
+VO <- VO[, colnames(VO) %in%colnames(RI)]
+UP <- UP[, colnames(UP) %in%colnames(RI)]
+UP <- UP[, colnames(UP) %in%colnames(VO)]
+UP <- UP[, colnames(UP) %in%colnames(VO)]
+UP <- UP[, colnames(UP) %in%colnames(VO)]
+UP <- UP[, colnames(UP) %in%colnames(MC)]
+RI <- RI[, colnames(RI) %in%colnames(UP)]
+MC <- MC[, colnames(MC) %in%colnames(UP)]
+VO <- VO[, colnames(VO) %in%colnames(UP)]
+RI <- cbind(RI[,1],RI[,-c(1)][ , order(names(RI[,-c(1)]))])
+MC <- cbind(MC[,1],MC[,-c(1)][ , order(names(MC[,-c(1)]))])
+UP <- cbind(UP[,1],UP[,-c(1)][ , order(names(UP[,-c(1)]))])
+VO <- cbind(VO[,1],VO[,-c(1)][ , order(names(VO[,-c(1)]))])
+RI <- as.xts(RI[,2:598], order.by = as.Date(RI[,1], "%Y-%m-&d"))
+MC <- as.xts(MC[,2:598], order.by = as.Date(MC[,1], "%Y-%m-&d"))
+VO <- as.xts(VO[,2:598], order.by = as.Date(VO[,1], "%Y-%m-&d"))
+UP <- as.xts(UP[,2:598], order.by = as.Date(UP[,1], "%Y-%m-&d"))
+
+#filter-and-return-calculations
+mc <- data.matrix(as.data.frame(MC))
+mc[ mc < 10] <- NA
+mc[ mc > 10] <- 1
+mc[ mc == 10] <- 1
+up <- data.matrix(as.data.frame(UP))
+up[ up < 10] <- NA
+up[ up > 10] <- 1
+up[ up == 10] <- 1
+vo <- data.matrix(as.data.frame(VO))
+vo[ vo < 10] <- NA
+vo[ vo > 10] <- 1
+vo[ vo == 10] <- 1
+mat.ret <- as.matrix(as.data.frame(RI, row.names = NULL)) * mc
+mat.ret <- mat.ret * up
+mat.ret <- mat.ret * vo
+RI <- as.xts(mat.ret, order.by = index(RI))
+nonNAs <- function(x) {
+    as.vector(apply(x, 2, function(x) length(which(!is.na(x)))))
+}
+y <- Map(function(x,y) {c(1:12)+(1*x)}, c(1:420))
+y1 <- Map(function(x) {RI[c(as.numeric(as.list(y[[x]][1])):as.numeric(as.list(y[[x]][12]))),]}, c(1:420))
+y2 <- Map(function(x) nonNAs(x), y1)
+y3 <- do.call(rbind, y2)
+y3[ y3 < 6] <- NA    
+y3[ y3 > 5] <- 1
+y9 <- rbind(rbind(rep(y3[1,], times = 1), rep(y3[1,], times = 1), rep(y3[1,], times = 1), rep(y3[1,], times = 1), rep(y3[1,], times = 1), rep(y3[1,], times = 1), rep(y3[1,], times = 1), rep(y3[1,], times = 1), rep(y3[1,], times = 1), rep(y3[1,], times = 1), rep(y3[1,], times = 1), rep(y3[1,], times = 1)), y3)
+b <- y9 * mat.ret
+write.csv(b, "b.csv")
+RImom <- as.xts(b, order.by = index(RI))
+#Calculations
+returns <- ROC(RI, n=1, type = "discrete", na.pad = TRUE)
+returnsmom <- ROC(RImom, n=1, type = "discrete", na.pad = TRUE)
+roc <- lapply(c(2,5,8,11,15), function(x) ROC(RImom, x, type = "discrete", na.pad = TRUE))
+
+#Constructing the Benchmark Portfolios.
+k <- mat.ret
+k[k > 0.0001] <- 1
+test <- as.matrix(as.data.frame(MC, row.names = NULL)) * k
+test <- as.xts(test, order.by = index(RI))
+SUMs <-  Map(function(x) {rowSums(test[x,], na.rm = TRUE)}, c(1:432))
+SUMs <- do.call(rbind, SUMs)
+weights <- Map(function(x) {MC[x,] / SUMs[x]}, c(1:432))
+weights <- lapply(weights, function(x) as.data.frame(x))
+RETS <- as.data.frame(returnsmom, row.names = NULL) 
+RETS <- split(RETS, 1:nrow(RETS))
+vw <- Map(function(x,y) {x*y}, RETS, weights)
+vw <- Map(function(x) {rowSums(x, na.rm = TRUE)}, vw)
+vw <- do.call(rbind, vw) 
+colnames(vw) <- c("vw")
+vw <- as.xts(vw, order.by = index(RI))
+Return.cumulative(vw)
+#Constructing the Equal-Weighted Benchmark. 
+ew <- returnsmom
+ew <- Map(function(x) {rowMeans(ew[x,], na.rm = TRUE)}, c(1:432))
+ew <- do.call(rbind, ew)
+ew <- as.data.frame(ew) 
+colnames(ew) <- c("ew")
+ew <- as.xts(ew, order.by = index(RI))
+Return.cumulative(ew)
+##MERK!: Benchmark bruker “returns”, mens CSXM bruker returnsmom. 
+
+#Constructing Sector Portfolios
+##SectorEWPortfolios
+sectorprices <- Map(function(x) {RImom[,as.character(Gics[grepl(x, GICS$Gics),]$Symbol)]}, c(10,15,20,25,30,35,40,45,50,55))
+sectorreturns <- Map(function(x) {ROC(x, 1, type = "discrete", na.pad = TRUE)}, sectorprices)
+sectorewreturns <- Map(function(x) {rowMeans(x, na.rm = TRUE)}, sectorreturns)
+ewIndices <- do.call(cbind, sectorewreturns)
+colnames(ewIndices) <- c("ewEnergy", "ewMaterial", "ewIndustry", "ewConsDisc", "ewConsStapl", "ewHealth", "ewFinance", "ewIT", "ewTelecom", "ewUtilities")
+##SectorVWPortfolios
+Mcaplong <- Map(function(x) {MC[,colnames(Sectorreturns[[x]])]}, c(1:10))
+SUMs <- Map(function(X) {Map(function(x) {rowSums(Mcaplong[[X]][x,], na.rm = TRUE)}, c(1:432))}, c(1:10))
+SUMs <- Map(function(x) {do.call(rbind, SUMs[[x]])}, c(1:10))
+weights <- Map(function(X) {Map(function(x) {Mcaplong[[X]][x,] / SUMs[[X]][x]}, c(1:432))}, c(1:10))
+weights <- Map(function(X) {lapply(weights[[X]], function(x) as.data.frame(x))}, c(1:10))
+RETS <- Map(function(x) {as.data.frame(Sectorreturns[[x]], row.names = NULL)}, c(1:10))
+RETS <- Map(function(x) {split(RETS[[x]], 1:nrow(RETS[[x]]))}, c(1:10))
+vwIndices <- Map(function(X) {Map(function(x,y) {x*y}, RETS[[X]], weights[[X]])}, c(1:10))
+vwIndices <- Map(function(X) {Map(function(x) {rowSums(x, na.rm = TRUE)}, vwIndices[[X]])}, c(1:10))
+vwIndices <- Map(function(x) {do.call(rbind, vwIndices[[x]])}, c(1:10))
+vwIndices <- do.call(cbind, vwIndices)
+colnames(vwIndices) <- c("vwEnergy", "vwMaterial", "vwIndustry", "vwConsDisc", "vwConsStapl", "vwHealth", "vwFinance", "vwIT", "vwTelecom", "vwUtilities")
+Return.cumulative(vwIndices)
+
+#CSIM Portfolio construction
+#Construct lists for row-wise calculations
+rets <- returnsmom[61:432,]
+RETS <- as.data.frame(returnsmom, row.names = NULL) 
+RETS <- RETS[61:432,]
+RETS <- RETS[rep(seq_len(nrow(RETS)), 10), ]
+RETS <- split(RETS, seq(nrow(RETS)))
+RETS <- list(RETS, RETS, RETS, RETS, RETS)
+lr <- lapply(roc, function(roc) lag(roc, k = 1, na.pad = TRUE))
+lr <- lapply(lr, function(x) as.data.frame(x, row.names = NULL))
+lr <- lapply(lr, function(x) {x[61:432,]}) 
+lr <- lapply(lr, function(x) {x[rep(seq_len(nrow(x)), 10), ]})
+lr <- lapply(lr, function(x) {split(x, seq(nrow(x)))})
+lr <- Map(function(n) {lapply(lr[[n]], sort)}, c(1:5))
+MCAP <- as.data.frame(test[61:432,], row.names = NULL)
+MCAP <- MCAP[rep(seq_len(nrow(MCAP)), 10), ]
+MCAP <- split(MCAP, seq(nrow(MCAP)))
+MCAP <- list(MCAP, MCAP, MCAP, MCAP, MCAP)
+#Calculate value-weighted CSIM decile series.      
+long <- Map(function(X) {Map(function(x,y) {colnames(x[c(round(ncol(x)*(1-y)):round(ncol(x)*(1.1-y)))])}, lr[[X]], rep(1:10, each = 372)*0.1)}, c(1:5))
+Mcaplong <- Map(function(x,y) {Map(function(x,y) {x[,y]}, MCAP[[x]], long[[y]])}, c(1:5), c(1:5))
+sumlong <- Map(function(x) {lapply(lapply(Mcaplong[[x]], as.matrix), function(x) {rowSums(x, na.rm = TRUE)})}, c(1:5))
+sumlong <- Map(function(x) {lapply(sumlong[[x]], as.data.frame)}, c(1:5))
+sumlong <- Map(function(x) {lapply(sumlong[[x]], function(x) {x[,1]})}, c(1:5))
+weightslong <- Map(function(a,b) {Map(function(x,y) {x/y}, Mcaplong[[a]], sumlong[[b]])}, c(1:5), c(1:5))
+long <- Map(function(a,b) {Map(function(x,y) {x[y]}, RETS[[a]], long[[b]])}, c(1:5), c(1:5))
+#sum of each weighted momentum return series yields value weighted(vw) returns
+long <- Map(function(a) {Map(function(x) {x[is.na(x)] <- 0; x}, long[[a]])}, c(1:5))
+weightslong <- Map(function(a) {Map(function(x) {x[is.na(x)] <- 0; x}, weightslong[[a]])}, c(1:5))
+long <- Map(function(a,b) {lapply(Map(function(x,y) {x*y}, weightslong[[a]], long[[b]]), rowSums)}, c(1:5), c(1:5))
+long <- Map(function(x) {do.call(rbind, long[[x]])}, c(1:5))
+x <- seq_along(long[[1]])
+lists <- split(x, ceiling(x/372))
+long <- Map(function(a,b) {Map(function(y) {long[[a]][y,]}, lists)}, c(1:5))
+long <- Map(function(x) {do.call(cbind, long[[x]])}, c(1:5))
+long <- Map(function(X) {as.xts(long[[X]], order.by = index(rets))}, c(1:5))
+CSIMvw <- do.call(cbind, long)
+colnames(CSIMvw ) <- unlist(Map(function(k, m) {paste("XSI", "P", k, "j", m, "vw", sep = "")}, rep(c("1", "2", "3", "4", "5", "6", "7", "8", "9", "ten"), 5), rep(c(3,6,9,12,16), each = 10)))
+#Calculate equal-weighted CSIM series. 
+long <- Map(function(X) {Map(function(x,y) {colnames(x[c(round(ncol(x)*(1-y)):round(ncol(x)*(1.1-y)))])}, lr[[X]], rep(1:10, each = 372)*0.1)}, c(1:5))
+long <- Map(function(a,b) {Map(function(x,y) {x[y]}, RETS[[a]], long[[b]])}, c(1:5), c(1:5))
+long <- Map(function(X) {Map(function(x) {rowMeans(x, na.rm = TRUE)}, long[[X]])}, c(1:5))
+long <- Map(function(X) {do.call(rbind, long[[X]])}, c(1:5))
+x <- seq_along(long[[1]])
+lists <- split(x, ceiling(x/372))
+long <- Map(function(a,b) {Map(function(y) {long[[a]][y,]}, lists)}, c(1:5))
+long <- Map(function(x) {do.call(cbind, long[[x]])}, c(1:5))
+long <- Map(function(X) {as.xts(long[[X]], order.by = index(rets))}, c(1:5))
+CSIMew <- do.call(cbind, long)
+colnames(CSIMew ) <- unlist(Map(function(k, m) {paste("XSI", "P", k, "j", m, "ew", sep = "")}, rep(c("1", "2", "3", "4", "5", "6", "7", "8", "9", "ten"), 5), rep(c(3,6,9,12,16), each = 10)))
+#Calculating 20% Best CSXIM Portfolios
+#Construct lists for row-wise calculations
+rets <- returns[61:432,]
+RETS <- as.data.frame(returnsmom, row.names = NULL) 
+RETS <- RETS[61:432,]
+RETS <- RETS[rep(seq_len(nrow(RETS)), 1), ]
+RETS <- split(RETS, seq(nrow(RETS)))
+RETS <- list(RETS, RETS, RETS, RETS, RETS)
+lr <- lapply(roc, function(roc) lag(roc, k = 1, na.pad = TRUE))
+lr <- lapply(lr, function(x) as.data.frame(x, row.names = NULL))
+lr <- lapply(lr, function(x) {x[61:432,]}) 
+lr <- lapply(lr, function(x) {x[rep(seq_len(nrow(x)), 1), ]})
+lr <- lapply(lr, function(x) {split(x, seq(nrow(x)))})
+lr <- Map(function(n) {lapply(lr[[n]], sort)}, c(1:5))
+MCAP <- as.data.frame(test[61:432,], row.names = NULL)
+MCAP <- MCAP[rep(seq_len(nrow(MCAP)), 1), ]
+MCAP <- split(MCAP, seq(nrow(MCAP)))
+MCAP <- list(MCAP, MCAP, MCAP, MCAP, MCAP)
+#VW20% calcs. 
+long <- Map(function(X) {Map(function(x,y) {colnames(x[c(round(ncol(x)*(1-y)):round(ncol(x)))])}, lr[[X]], rep(2, each = 372)*0.1)}, c(1:5))
+Mcaplong <- Map(function(x,y) {Map(function(x,y) {x[,y]}, MCAP[[x]], long[[y]])}, c(1:5), c(1:5))
+sumlong <- Map(function(x) {lapply(lapply(Mcaplong[[x]], as.matrix), function(x) {rowSums(x, na.rm = TRUE)})}, c(1:5))
+sumlong <- Map(function(x) {lapply(sumlong[[x]], as.data.frame)}, c(1:5))
+sumlong <- Map(function(x) {lapply(sumlong[[x]], function(x) {x[,1]})}, c(1:5))
+weightslong <- Map(function(a,b) {Map(function(x,y) {x/y}, Mcaplong[[a]], sumlong[[b]])}, c(1:5), c(1:5))
+long <- Map(function(a,b) {Map(function(x,y) {x[y]}, RETS[[a]], long[[b]])}, c(1:5), c(1:5))
+#sum of each weighted momentum return series yields value weighted(vw) returns
+long <- Map(function(a) {Map(function(x) {x[is.na(x)] <- 0; x}, long[[a]])}, c(1:5))
+weightslong <- Map(function(a) {Map(function(x) {x[is.na(x)] <- 0; x}, weightslong[[a]])}, c(1:5))
+long <- Map(function(a,b) {lapply(Map(function(x,y) {x*y}, weightslong[[a]], long[[b]]), rowSums)}, c(1:5), c(1:5))
+long <- Map(function(x) {do.call(rbind, long[[x]])}, c(1:5))
+x <- seq_along(long[[1]])
+lists <- split(x, ceiling(x/372))
+long <- Map(function(a,b) {Map(function(y) {long[[a]][y,]}, lists)}, c(1:5))
+long <- Map(function(x) {do.call(cbind, long[[x]])}, c(1:5))
+long <- Map(function(X) {as.xts(long[[X]], order.by = index(rets))}, c(1:5))
+CSXIM20vw <- do.call(cbind, long)
+colnames(CSXIM20vw ) <- unlist(Map(function(k, m) {paste("CSXIM", "P",  k, "LB", m, "vw", sep = "")}, rep(c("20"), 1), rep(c(3,6,9,12,16), each = 1)))
+#EW20% calcs.
+long <- Map(function(X) {Map(function(x,y) {colnames(x[c(round(ncol(x)*(1-y)):round(ncol(x)))])}, lr[[X]], rep(2, each = 372)*0.1)}, c(1:5))
+long <- Map(function(a,b) {Map(function(x,y) {x[y]}, RETS[[a]], long[[b]])}, c(1:5), c(1:5))
+long <- Map(function(X) {Map(function(x) {rowMeans(x, na.rm = TRUE)}, long[[X]])}, c(1:5))
+long <- Map(function(X) {do.call(rbind, long[[X]])}, c(1:5))
+x <- seq_along(long[[1]])
+lists <- split(x, ceiling(x/372))
+long <- Map(function(a,b) {Map(function(y) {long[[a]][y,]}, lists)}, c(1:5))
+long <- Map(function(x) {do.call(cbind, long[[x]])}, c(1:5))
+long <- Map(function(X) {as.xts(long[[X]], order.by = index(rets))}, c(1:5))
+CSXIM20ew <- do.call(cbind, long)
+colnames(CSXIM20ew ) <- unlist(Map(function(k, m) {paste("CSXIM", "P",  k, "LB", m, "ew", sep = "")}, rep(c("20"), 1), rep(c(30,6,9,12,16), each = 1)))
+
+#CSSM Portfolio construction.
+#Construct lists for row-wise calculations
+vwIndicesROC <- Map(function(X) {do.call(cbind,Map(function(x) {ROC(vwIndices[,x], X, type = "discrete", na.pad = TRUE)}, c(1:10)))}, c(2, 5, 8, 11, 15))
+rets <- returnsmom[61:432,]
+for (i in 1:5) {colnames(vwIndicesROC[[i]]) <- colnames(vwIndices)}
+rets <- vwIndices[61:432,]
+RETS <- as.data.frame(vwIndices, row.names = NULL) 
+RETS <- RETS[61:432,]
+RETS <- RETS[rep(seq_len(nrow(RETS)), 10), ]
+RETS <- split(RETS, seq(nrow(RETS)))
+RETS <- list(RETS, RETS, RETS, RETS, RETS)
+lr <- lapply(vwIndicesROC, function(roc) lag(roc, k = 1, na.pad = TRUE))
+lr <- lapply(lr, function(x) as.data.frame(x, row.names = NULL))
+lr <- lapply(lr, function(x) {x[61:432,]}) 
+lr <- lapply(lr, function(x) {x[rep(seq_len(nrow(x)), 10), ]})
+lr <- lapply(lr, function(x) {split(x, seq(nrow(x)))})
+lr <- Map(function(n) {lapply(lr[[n]], sort)}, c(1:5))
+#Calculate value-weighted CSSM decile series. 
+long <- Map(function(X) {Map(function(x,y) {colnames(x[c(round(ncol(x)*(1-y)):round(ncol(x)*(1.1-y)))])}, lr[[X]], rep(1:10, each = 372)*0.1)}, c(1:5))
+long <- Map(function(a,b) {Map(function(x,y) {x[y]}, RETS[[a]], long[[b]])}, c(1:5), c(1:5))
+long <- Map(function(X) {Map(function(x) {rowMeans(x, na.rm = TRUE)}, long[[X]])}, c(1:5))
+long <- Map(function(x) {do.call(rbind, long[[x]])}, c(1:5))
+x <- seq_along(long[[1]])
+lists <- split(x, ceiling(x/372))
+long <- Map(function(a) {Map(function(y) {long[[a]][y,]}, lists)}, c(1:5))
+long <- Map(function(x) {do.call(cbind, long[[x]])}, c(1:5))
+long <- do.call(cbind, long)
+long <- as.xts(long, order.by = index(returns[61:432,]))
+CSSMvw <- long
+colnames(CSSMvw ) <- unlist(Map(function(k, m) {paste("XSS", "P", k, "j", m, "vw", sep = "")}, rep(c("1", "2", "3", "4", "5", "6", "7", "8", "9", "ten"), 5), rep(c(3,6,9,12,16), each = 10)))
+#Calculate equal-weighted CSSM decile series. 
+ewIndicesROC <- Map(function(X) {do.call(cbind,Map(function(x) {ROC(ewIndices[,x], X, type = "discrete", na.pad = TRUE)}, c(1:10)))}, c(2, 5, 8, 11, 15))
+rets <- returns[61:432,]
+for (i in 1:5) {colnames(ewIndicesROC[[i]]) <- colnames(ewIndices)}
+rets <- ewIndices[61:432,]
+RETS <- as.data.frame(ewIndices, row.names = NULL) 
+RETS <- RETS[61:432,]
+RETS <- RETS[rep(seq_len(nrow(RETS)), 10), ]
+RETS <- split(RETS, seq(nrow(RETS)))
+RETS <- list(RETS, RETS, RETS, RETS, RETS)
+lr <- lapply(ewIndicesROC, function(roc) lag(roc, k = 1, na.pad = TRUE))
+lr <- lapply(lr, function(x) as.data.frame(x, row.names = NULL))
+lr <- lapply(lr, function(x) {x[61:432,]}) 
+lr <- lapply(lr, function(x) {x[rep(seq_len(nrow(x)), 10), ]})
+lr <- lapply(lr, function(x) {split(x, seq(nrow(x)))})
+lr <- Map(function(n) {lapply(lr[[n]], sort)}, c(1:5))
+long <- Map(function(X) {Map(function(x,y) {colnames(x[c(round(ncol(x)*(1-y)):round(ncol(x)*(1.1-y)))])}, lr[[X]], rep(1:10, each = 372)*0.1)}, c(1:5))
+long <- Map(function(a,b) {Map(function(x,y) {x[y]}, RETS[[a]], long[[b]])}, c(1:5), c(1:5))
+long <- Map(function(X) {Map(function(x) {rowMeans(x, na.rm = TRUE)}, long[[X]])}, c(1:5))
+long <- Map(function(x) {do.call(rbind, long[[x]])}, c(1:5))
+x <- seq_along(long[[1]])
+lists <- split(x, ceiling(x/372))
+long <- Map(function(a) {Map(function(y) {long[[a]][y,]}, lists)}, c(1:5))
+long <- Map(function(x) {do.call(cbind, long[[x]])}, c(1:5))
+long <- do.call(cbind, long)
+long <- as.xts(long, order.by = index(returns[61:432,]))
+CSSMew <- long
+colnames(CSSMew ) <- unlist(Map(function(k, m) {paste("XSS", "P", k, "j", m, "ew", sep = "")}, rep(c("1", "2", "3", "4", "5", "6", "7", "8", "9", "ten"), 5), rep(c(3,6,9,12,16), each = 10)))
+#20% calcs. 
+#VW
+RETS <- as.data.frame(vwIndices, row.names = NULL) 
+RETS <- RETS[61:432,]
+RETS <- RETS[rep(seq_len(nrow(RETS)), 1), ]
+RETS <- split(RETS, seq(nrow(RETS)))
+RETS <- list(RETS, RETS, RETS, RETS, RETS)
+lr <- lapply(vwIndicesROC, function(roc) lag(roc, k = 1, na.pad = TRUE))
+lr <- lapply(lr, function(x) as.data.frame(x, row.names = NULL))
+lr <- lapply(lr, function(x) {x[61:432,]}) 
+lr <- lapply(lr, function(x) {x[rep(seq_len(nrow(x)), 1), ]})
+lr <- lapply(lr, function(x) {split(x, seq(nrow(x)))})
+lr <- Map(function(n) {lapply(lr[[n]], sort)}, c(1:5))
+long <- Map(function(X) {Map(function(x,y) {colnames(x[c(round(ncol(x)*(1-y)):round(ncol(x)))])}, lr[[X]], rep(2, each = 372)*0.1)}, c(1:5))
+long <- Map(function(a,b) {Map(function(x,y) {x[y]}, RETS[[a]], long[[b]])}, c(1:5), c(1:5))
+long <- Map(function(X) {Map(function(x) {rowMeans(x, na.rm = TRUE)}, long[[X]])}, c(1:5))
+long <- Map(function(x) {do.call(rbind, long[[x]])}, c(1:5))
+x <- seq_along(long[[1]])
+lists <- split(x, ceiling(x/372))
+long <- Map(function(a) {Map(function(y) {long[[a]][y,]}, lists)}, c(1:5))
+long <- Map(function(x) {do.call(cbind, long[[x]])}, c(1:5))
+long <- do.call(cbind, long)
+long <- as.xts(long, order.by = index(returns[61:432,]))
+CSXSM20vw <- long
+colnames(CSXSM20vw) <- unlist(Map(function(k, m) {paste("CSXSM", "P", k, "LB", m, "vw", sep = "")}, rep(c("20"), 1), rep(c(3,6,9,11,16), each = 1)))
+#EW
+RETS <- as.data.frame(ewIndices, row.names = NULL) 
+RETS <- RETS[61:432,]
+RETS <- RETS[rep(seq_len(nrow(RETS)), 1), ]
+RETS <- split(RETS, seq(nrow(RETS)))
+RETS <- list(RETS, RETS, RETS, RETS, RETS)
+lr <- lapply(ewIndicesROC, function(roc) lag(roc, k = 1, na.pad = TRUE))
+lr <- lapply(lr, function(x) as.data.frame(x, row.names = NULL))
+lr <- lapply(lr, function(x) {x[61:432,]}) 
+lr <- lapply(lr, function(x) {x[rep(seq_len(nrow(x)), 1), ]})
+lr <- lapply(lr, function(x) {split(x, seq(nrow(x)))})
+lr <- Map(function(n) {lapply(lr[[n]], sort)}, c(1:5))
+long <- Map(function(X) {Map(function(x,y) {colnames(x[c(round(ncol(x)*(1-y)):round(ncol(x)))])}, lr[[X]], rep(2, each = 372)*0.1)}, c(1:5))
+long <- Map(function(a,b) {Map(function(x,y) {x[y]}, RETS[[a]], long[[b]])}, c(1:5), c(1:5))
+long <- Map(function(X) {Map(function(x) {rowMeans(x, na.rm = TRUE)}, long[[X]])}, c(1:5))
+long <- Map(function(x) {do.call(rbind, long[[x]])}, c(1:5))
+x <- seq_along(long[[1]])
+lists <- split(x, ceiling(x/372))
+long <- Map(function(a) {Map(function(y) {long[[a]][y,]}, lists)}, c(1:5))
+long <- Map(function(x) {do.call(cbind, long[[x]])}, c(1:5))
+long <- do.call(cbind, long)
+long <- as.xts(long, order.by = index(returns[61:432,]))
+CSXSM20ew <- long
+colnames(CSXSM20ew) <- unlist(Map(function(k, m) {paste("CSXSM", "P", k, "LB", m, "ew", sep = "")}, rep(c("20"), 1), rep(c(3,6,9,11,16), each = 1)))
+
+#absolute-momentum-calcs
+##Return cumulative benchmark  3.
+kkk3 <- vw
+m3 <- Map(function(x) {c(1:3)+x}, c(0,1:429))
+K3 <- Map(function(x) {Return.cumulative(kkk3[x])}, m3)
+K3 <- do.call(rbind,K3)
+K3 <- Map(function(x) {K3[[x]][1]}, c(1:430))
+K3 <- do.call(rbind,K3)
+K3 <- K3[1:430,]
+K3 <- as.xts(K3, order.by = index(vw[3:432,]))
+##Return cumulative rf 3.
+rf3 <- read.csv("Data.csv")[,2]
+R3 <- Map(function(x) {Return.cumulative(rf3[x])}, m3)
+R3 <- do.call(rbind,R3)
+R3 <- Map(function(x) {R3[[x]][1]}, c(1:430))
+R3 <- do.call(rbind,R3)
+R3 <- R3[1:430,]
+R3 <- as.xts(R3, order.by = index(vw[3:432,]))
+##Cumulative Excess Returns: 
+ex3 <- K3 - R3
+ex3 <- ex3["1985-01-01/2015-31-12-"]
+##Return cumulative benchmark  6.
+kkk6 <- vw
+m6 <- Map(function(x) {c(1:6)+x}, c(0,1:426))
+K6 <- Map(function(x) {Return.cumulative(kkk6[x])}, m6)
+K6 <- do.call(rbind,K6)
+K6 <- Map(function(x) {K6[[x]][1]}, c(1:427))
+K6 <- do.call(rbind,K6)
+K6 <- K6[1:427,]
+K6 <- as.xts(K6, order.by = index(vw[6:432,]))
+##Return cumulative rf 6.
+rf6 <- read.csv("Data.csv")[,2]
+R6 <- Map(function(x) {Return.cumulative(rf6[x])}, m6)
+R6 <- do.call(rbind,R6)
+R6 <- Map(function(x) {R6[[x]][1]}, c(1:427))
+R6 <- do.call(rbind,R6)
+R6 <- R6[1:427,]
+R6 <- as.xts(R6, order.by = index(vw[6:432,]))
+##Cumulative Excess Returns: 
+ex6 <- K6 - R6
+ex6 <- ex6["1985-01-01/2015-31-12-"]
+##Return cumulative benchmark  9.
+kkk9 <- vw
+m9 <- Map(function(x) {c(1:9)+x}, c(0,1:423))
+K9 <- Map(function(x) {Return.cumulative(kkk9[x])}, m9)
+K9 <- do.call(rbind,K9)
+K9 <- Map(function(x) {K9[[x]][1]}, c(1:424))
+K9 <- do.call(rbind,K9)
+K9 <- K9[1:424,]
+K9 <- as.xts(K9, order.by = index(vw[9:432,]))
+##Return cumulative rf 6.
+rf9 <- read.csv("Data.csv")[,2]
+R9 <- Map(function(x) {Return.cumulative(rf9[x])}, m9)
+R9 <- do.call(rbind,R9)
+R9 <- Map(function(x) {R9[[x]][1]}, c(1:424))
+R9 <- do.call(rbind,R9)
+R9 <- R9[1:424,]
+R9 <- as.xts(R9, order.by = index(vw[9:432,]))
+##Cumulative Excess Returns: 
+ex9 <- K9 - R9
+ex9 <- ex9["1985-01-01/2015-31-12-"]
+##Return cumulative benchmark  12.
+kkk12 <- vw
+m12 <- Map(function(x) {c(1:12)+x}, c(0,1:420))
+K12 <- Map(function(x) {Return.cumulative(kkk12[x])}, m12)
+K12 <- do.call(rbind,K12)
+K12 <- Map(function(x) {K12[[x]][1]}, c(1:421))
+K12 <- do.call(rbind,K12)
+K12 <- K12[1:421,]
+K12 <- as.xts(K12, order.by = index(vw[12:432,]))
+##Return cumulative rf 12.
+rf12 <- read.csv("Data.csv")[,2]
+R12 <- Map(function(x) {Return.cumulative(rf12[x])}, m12)
+R12 <- do.call(rbind,R12)
+R12 <- Map(function(x) {R12[[x]][1]}, c(1:421))
+R12 <- do.call(rbind,R12)
+R12 <- R12[1:421,]
+R12<- as.xts(R12, order.by = index(vw[12:432,]))
+#Cumulative Excess Returns: 
+ex12 <- K12 - R12
+ex12 <- ex12["1985-01-01/2015-31-12-"]
+##Return cumulative benchmark  12.
+kkk16 <- vw
+m16 <- Map(function(x) {c(1:16)+x}, c(0,1:416))
+K16 <- Map(function(x) {Return.cumulative(kkk16[x])}, m16)
+K16 <- do.call(rbind,K16)
+K16 <- Map(function(x) {K16[[x]][1]}, c(1:417))
+K16 <- do.call(rbind,K16)
+K16 <- K16[1:417,]
+K16 <- as.xts(K16, order.by = index(vw[16:432,]))
+##Return cumulative rf 12.
+rf16 <- read.csv("Data.csv")[,2]
+R16 <- Map(function(x) {Return.cumulative(rf16[x])}, m16)
+R16 <- do.call(rbind,R16)
+R16 <- Map(function(x) {R16[[x]][1]}, c(1:417))
+R16 <- do.call(rbind,R16)
+R16 <- R16[1:417,]
+R16<- as.xts(R16, order.by = index(vw[16:432,]))
+#Cumulative Excess Returns: 
+ex16 <- K16 - R16
+ex16 <- ex16["1985-01-01/2015-31-12-"]
+##Get Rf, Market Factors, Market Portfolios. 
+data <- read.csv("Data.csv", header = TRUE)
+data <- data[61:432,-c(1, 12:51)]
+data <- as.xts(data, order.by = index(RI[61:432,]))
+##Bind series. 
+all <- cbind(data, vw[61:432,], ew[61:432,], vwIndices[61:432,], ewIndices[61:432,], CSXIM20vw, CSIMvw, CSXIM20ew, CSIMew, CSXSM20vw, CSSMvw, CSXSM20ew, CSSMew)
+INDICATOR2 <- list(ex3, ex6, ex9, ex12, ex16)
+Rf <- all[,1]
+Rf <- list(Rf, Rf, Rf, Rf, Rf) 
+all[is.na(all)] <- 0
+AM <- Map(function(Y) {Map(function(X) {apply(all[X,-c(1)], 2, function(x) {x[INDICATOR2[[Y]][[X]] < 0] <- Rf[[Y]][[X]]; x})}, c(1:372))}, c(1:5))
+AM <- Map(function(x) {do.call(rbind, AM[[x]])}, c(1:5))
+AM <- Map(function(X) {as.xts(AM[[X]], order.by = index(data))}, c(1:5))
+for (i in 1:5) {
+    colnames(AM[[i]]) <- Map(function(x) {paste("DM", x, colnames(all)[-1], sep = "")}, c(3,6,9,12,16))[[i]]
+}
+DMRL <- do.call(cbind, AM)
+##Bind together ALL Portfolios
+all <- cbind(all, DMRL)
+all[is.na(all)] <- 0
+
+#performance-measures
+PM <- Map(function(x,y) {cbind(t(data.frame(table.Distributions(x, scale = NA, digits = 3))), t(Return.cumulative(x)),  t(table.AnnualizedReturns(x, scale = 12, y, geometric = TRUE, digits = 3)), t(maxDrawdown(x,invert = FALSE)), t(data.frame(Kappa(x, MAR = 0, 1))), t(data.frame(Kappa(x, MAR = 0, 2))), t(data.frame(Kappa(x, MAR = 0, 3))), t(data.frame(UpsidePotentialRatio(x, MAR = 0, method = "full"))),  t(data.frame(InformationRatio(x, x[,11]))))}, list(all[1:372,], all[1:186,], all[187:372,], all[1:60,], all[61:120,], all[121:180,], all[181:240,], all[241:300,], all[277:300, ], all[301:360,], all[61:180,], all[181:300, ]), list(Rf[[1]][1:372,], Rf[[1]][1:186,], Rf[[1]][187:372,], Rf[[1]][1:60,], Rf[[1]][61:120,], Rf[[1]][121:180,], Rf[[1]][181:240,], Rf[[1]][241:300,], Rf[[1]][277:300, ], Rf[[1]][301:360,], Rf[[1]][61:180,], Rf[[1]][181:300,]))
+pm <- Map(function(x) {as.data.frame(x, row.names = NULL)}, PM)
+pm <- Map(function(x) {cbind(colnames(all), pm[[x]])}, c(1:12))
+for (i in 1:12) {colnames(pm[[i]]) <- c("Portfolio", "mSD", "Skew", "Kurt", "ExKurt", "SSkew", "SExKurt", "CumRet", "AnnRet", "AnnSD", "AnnSP", "WorstDD", "Omega", "SOR", "Kappa3", "UpPot", "IR")}
+pm <- Map(function(x) {tbl_df(pm[[x]])}, c(1:12))
+
+#packages
+install.packages("zoo")
+install.packages("TTR")
+install.packages("xts")
+install.packages("quantmod")
+install.packages("tidyr")
+install.packages("dplyr") 
+install.packages("PerformanceAnalytics")
+install.packages("FinancialInstrument") 
+install.packages("stargazer")
+install.packages("ggplot2")
+install.packages("grid")
+install.packages("gridExtra")
+library(zoo)
+library(TTR)
+library(xts)
+library(quantmod)
+library(data.table)
+library(PerformanceAnalytics)
+library(FinancialInstrument)
+library(stargazer)
+library(dplyr)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(tidyr)
+
+#box-plot-robustness-test
+##Construct Benchmark Performance 
+target <- c("1985-2015",  "1985-2000", "1990-1999", "2000-2015", "2000-2009", "2008")
+target2 <- c("1985-1989",  "1990-1994", "1995-1999", "2000-2004", "2005-2009", "2010-2014")
+BM <- Map(function(x) {filter(pm[[x]], grepl("\\bvw\\b|\\bew\\b", Portfolio))}, c(1:12))
+BM <- Map(function(x) {BM[[x]][c(1,11)]}, c(1:12))
+Period <- c("1985-2015","1985-2000", "2000-2015","1985-1989","1990-1994","1995-1999", "2000-2004","2005-2009", "2008","2010-2014", "1990-1999","2000-2009")
+BM <- mapply(cbind, BM, "Period"=Period, SIMPLIFY=F)
+BM <- do.call(rbind, BM)
+BMvw1 <- filter(BM, Portfolio == "vw", Period %in% target)
+BMvw2 <- filter(BM, Portfolio == "vw", Period %in% target2)
+BMew1 <- filter(BM, Portfolio == "ew", Period %in% target)
+BMew2 <- filter(BM, Portfolio == "ew", Period %in% target2)
+BM2 <- Map(function(X) {do.call(rbind, Map(function(x) {filter(pm[[X]], grepl(x, Portfolio))}, c("\\bDM3vw\\b","\\bDM6vw\\b", "\\bDM9vw\\b", "\\bDM12vw\\b", "\\bDM16vw\\b","\\bDM3ew\\b","\\bDM6ew\\b", "\\bDM9ew\\b", "\\bDM12ew\\b", "\\bDM16ew\\b" )))}, c(1:12))
+BM2 <- Map(function(x) {BM2[[x]][c(1,12)]}, c(1:12))
+BM2 <- mapply(cbind, BM2, "Period"=Period, SIMPLIFY=F)
+BM2 <- do.call(rbind, BM2)
+LookBack <- c("DM3", "DM6", "DM9", "DM12", "DM16")
+BM2 <- Map(function(x) {filter(BM2, grepl(x, Portfolio))}, LookBack)
+BM2 <- mapply(cbind, BM2, "LookBack"=LookBack, SIMPLIFY=F)
+BM2 <- do.call(rbind, BM2) 
+BM2vw <- filter(filter(BM2, grepl("vw", Portfolio), Period %in% target))
+BM2ew <- filter(filter(BM2, grepl("ew", Portfolio), Period %in% target))
+
+dd11 <- filter(BM, Period %in% target) 
+dd12 <- filter(BM, Period %in% target2) 
+dd21 <- filter(BM2, Period %in% target) 
+dd22 <- filter(BM2, Period %in% target2) 
+#XSI/XSS
+box <- pm 
+box <- Map(function(x) {filter(box[[x]], grepl("XSI|XSS", Portfolio))}, c(1:12))
+box <- Map(function(x) {filter(box[[x]], !grepl("DM", Portfolio))}, c(1:12))
+box <- mapply(cbind, box, "Period"=Period, SIMPLIFY=F)
+box <- do.call(rbind, box)
+LookBack <- c("j3", "j6", "j9", "j12", "j16")
+box <- Map(function(x) {filter(box, grepl(x, Portfolio))}, LookBack)
+box <- mapply(cbind, box, "LookBack"=LookBack, SIMPLIFY=F)
+box <- do.call(rbind, box)
+Portfolio <- c("P1","P2", "P3","P4","P5","P6", "P7","P8", "P9","Pten")
+box <- Map(function(x) {filter(box, grepl(x, Portfolio))}, Portfolio)
+box <- mapply(cbind, box, "TopTrading"=Portfolio, SIMPLIFY=F)
+box <- do.call(rbind, box)
+Type <- c("XSI","XSS")
+box <- Map(function(x) {filter(box, grepl(x, Portfolio))}, Type)
+box <- mapply(cbind, box, "Type"=Type, SIMPLIFY=F)
+box <- do.call(rbind, box)
+Weighting <- c("ew","vw")
+box <- Map(function(x) {filter(box, grepl(x, Portfolio))}, Weighting)
+box <- mapply(cbind, box, "Weighting"=Weighting, SIMPLIFY=F)
+box <- do.call(rbind, box)
+rownames(box) <- NULL
+box <- tbl_df(box)
+#ROBUSTNESS TESTS XSI
+#Construct diagram to show that LB12 and ew Is a decent choice. (FIGURE 1) 
+boxsub <- filter(box, Weighting == "vw", Type == "XSI")
+g <- ggplot(boxsub, aes(x=TopTrading, y=AnnSP)) +
+    geom_blank()+
+    geom_boxplot() +
+    facet_grid(LookBack~.)
+g <- g+coord_cartesian(ylim=c(-0.3,1.25))
+g <- g+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g <- g + theme(panel.background = element_blank())
+g <- g+ theme(axis.line = element_line(colour = "black"))
+g <- g+ theme_bw()
+g <- g+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+##SHOW XSI LONGER PERIODS_. (FIGURE 1) #
+boxsub1 <- filter(box, Type == "XSI", Period %in% target,Weighting == "vw")
+g1 <- ggplot(boxsub1, aes(x=TopTrading, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~LookBack) +
+    geom_hline(data = BMvw, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g1 <- g1 +coord_cartesian(ylim=c(-0.5,1)) #do not use +ylim() here
+g1 <- g1 + geom_hline(data = BMvw1, color = "red", aes(yintercept = AnnSP), linetype = "dotted")
+g1 <- g1 + geom_line()
+g1 <- g1+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g1 <- g1 + theme(panel.background = element_blank())
+g1 <- g1+ theme(axis.line = element_line(colour = "black"))
+g1 <- g1+ theme_bw()
+g1 <- g1+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+##SHOW XSI SHORTER PERIODS_. (FIGURE 1) 
+boxsub1<- filter(box, Type == "XSI", Period %in% target2,Weighting == "vw")
+g1 <- ggplot(boxsub1, aes(x=TopTrading, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~LookBack) +
+    geom_hline(data = BMvw2, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g1 <- g1 +coord_cartesian(ylim=c(-0.3,1)) #do not use +ylim() here
+g1 <- g1 + geom_line()
+g1 <- g1+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g1 <- g1 + theme(panel.background = element_blank())
+g1 <- g1+ theme(axis.line = element_line(colour = "black"))
+g1 <- g1+ theme_bw()
+g1 <- g1+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+g1 <- g1+ geom_path()
+G1 <- grid.arrange(g1, g2, ncol=2)
+##ROBUSTNESS TESTS XSS
+##Construct diagram to show that LB12 and ew Is a decent choice. (FIGURE 1) 
+boxsub <- filter(box, Weighting == "vw", Type == "XSS")
+g <- ggplot(boxsub, aes(x=TopTrading, y=AnnSP)) +
+    geom_blank()+
+    geom_boxplot() +
+    facet_grid(LookBack~.)
+g <- g+coord_cartesian(ylim=c(-0.3,1.25))
+g <- g+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g <- g + theme(panel.background = element_blank())
+g <- g+ theme(axis.line = element_line(colour = "black"))
+g <- g+ theme_bw()
+g <- g+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+##SHOW XSI LONGER PERIODS_. (FIGURE 1) #
+boxsub1 <- filter(box, Type == "XSS", Period %in% target,Weighting == "vw")
+g1 <- ggplot(boxsub1, aes(x=TopTrading, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~LookBack) +
+    geom_hline(data = BMvw, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g1 <- g1 +coord_cartesian(ylim=c(-0.5,1)) #do not use +ylim() here
+g1 <- g1 + geom_hline(data = BMvw1, color = "red", aes(yintercept = AnnSP), linetype = "dotted")
+g1 <- g1 + geom_line()
+g1 <- g1+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g1 <- g1 + theme(panel.background = element_blank())
+g1 <- g1+ theme(axis.line = element_line(colour = "black"))
+g1 <- g1+ theme_bw()
+g1 <- g1+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+##SHOW XSI SHORTER PERIODS_. (FIGURE 1) 
+boxsub1<- filter(box, Type == "XSS", Period %in% target2,Weighting == "vw")
+g1 <- ggplot(boxsub1, aes(x=TopTrading, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~LookBack) +
+    geom_hline(data = BMvw2, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g1 <- g1 +coord_cartesian(ylim=c(-0.4,1.25)) #do not use +ylim() here
+g1 <- g1 + geom_line()
+g1 <- g1+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g1 <- g1 + theme(panel.background = element_blank())
+g1 <- g1+ theme(axis.line = element_line(colour = "black"))
+g1 <- g1+ theme_bw()
+g1 <- g1+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+g1 <- g1+ geom_path()
+##ROBUSTNESS TESTS MARKET PORTFOLIO 
+##Check look backs. 
+box <- pm
+box <- Map(function(x) {filter(box[[x]], grepl("\\bvw\\b|\\bew\\b|\\bDM3vw\\b|\\bDM6vw\\b|\\bDM9vw\\b|\\bDM12vw\\b|\\bDM16vw\\b|\\bDM3ew\\b|\\bDM6ew\\b|\\bDM9ew\\b|\\bDM12ew\\b|\\bDM16ew\\b", Portfolio))}, c(1:12))
+box <- Map(function(x) {filter(box[[x]], !grepl("ew", Portfolio))}, c(1:12))
+box <- mapply(cbind, box, "Period"=Period, SIMPLIFY=F)
+box <- do.call(rbind, box)
+LookBack <- c("\\bvw\\b","DM3", "DM6", "DM9", "DM12", "DM16")
+box <- Map(function(x) {filter(box, grepl(x, Portfolio))}, LookBack)
+box <- mapply(cbind, box, "LookBack"=LookBack, SIMPLIFY=F)
+box <- do.call(rbind, box)
+rownames(box) <- NULL
+box <- tbl_df(box)
+boxsub <- box
+write.csv(boxsub, "boxsub.csv")
+boxsub2 <- read.csv("boxsub.csv", header = TRUE)
+boxsub2 <- as.data.frame(boxsub2)
+boxsub2$Portfolio <- as.character(boxsub2$Portfolio)
+g <- ggplot(boxsub2, aes(x=Portfolio, y=AnnSP)) +
+    geom_blank()+
+    geom_boxplot()
+g <- g+coord_cartesian(ylim=c(0,2))
+g <- g+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g <- g + theme(panel.background = element_blank())
+g <- g+ theme(axis.line = element_line(colour = "black"))
+g <- g+ theme_bw()
+g <- g+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+##Check All periods. 
+layout(rbind(c(1), c(2)))
+i <- tbl_df(boxsub2)
+i <- filter(i, Period %in% target)
+g1 <- ggplot(i, aes(x=Portfolio, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~.) +
+    geom_hline(data = BMvw1, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g1 <- g1+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g1 <- g1 + theme(panel.background = element_blank())
+g1 <- g1+ theme(axis.line = element_line(colour = "black"))
+g1 <- g1+ theme_bw()
+g1 <- g1+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+i <- tbl_df(boxsub2)
+i <- filter(i, Period %in% target2)
+g2 <- ggplot(i, aes(x=Portfolio, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~.) +
+    geom_hline(data = BMvw2, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g2 <- g2+ scale_x_discrete(name="") + scale_y_continuous(name="")
+g2 <- g2 + theme(panel.background = element_blank())
+g2 <- g2+ theme(axis.line = element_line(colour = "black"))
+g2 <- g2+ theme_bw()
+g2 <- g2+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+G1 <- grid.arrange(g1, g2, ncol=2)
+##ROBUSTNESS TESTS SECTORS TIME_SERIES_MOM
+##Check look backs. 
+box <- pm
+box <- Map(function(x) {filter(box[[x]],
+grepl("Energy|Material|Industry|ConsDisc|ConsStapl|Health|Finance|IT|Telecom|Utilities", Portfolio))}, c(1:12))
+box <- Map(function(x) {filter(box[[x]], !grepl("ew|DM3|DM6|DM9|DM16", Portfolio))}, c(1:12))
+box <- mapply(cbind, box, "Period"=Period, SIMPLIFY=F)
+box <- do.call(rbind, box)
+boxsub2 <- box
+write.csv(boxsub2, "boxsub3.csv")
+boxsub3 <- read.csv("boxsub1.csv", header = TRUE)
+boxsub3 <- as.data.frame(boxsub3)
+boxsub3$Portfolio <- as.character(boxsub3$Portfolio)
+g <- ggplot(boxsub3, aes(x=Portfolio, y=AnnSP)) +
+    geom_blank()+
+    geom_boxplot()
+g <- g+coord_cartesian(ylim=c(-1,2))
+g <- g+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g <- g + theme(panel.background = element_blank())
+g <- g+ theme(axis.line = element_line(colour = "black"))
+g <- g+ theme_bw()
+g <- g+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+##Check All periods. 
+i <- tbl_df(boxsub3)
+i <- filter(i, Period %in% target)
+g1 <- ggplot(i, aes(x=Portfolio, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~.) +
+    geom_hline(data = BMvw1, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g1 <- g1+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g1 <- g1 + theme(panel.background = element_blank())
+g1 <- g1+ theme(axis.line = element_line(colour = "black"))
+g1 <- g1+ theme_bw()
+g1 <- g1+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+i <- tbl_df(boxsub3)
+i <- filter(i, Period %in% target2)
+g2 <- ggplot(i, aes(x=Portfolio, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~.) +
+    geom_hline(data = BMvw2, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g2 <- g2+ scale_x_discrete(name="") + scale_y_continuous(name="")
+g2 <- g2 + theme(panel.background = element_blank())
+g2 <- g2+ theme(axis.line = element_line(colour = "black"))
+g2 <- g2+ theme_bw()
+g2 <- g2+coord_cartesian(ylim=c(-2,2))
+g2 <- g2+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+G1 <- grid.arrange(g1, g2, ncol=2)
+##ROBUSTNESS TESTS DUAL-MOMENTUM (XSI) 
+box <- pm
+box <- Map(function(x) {filter(box[[x]], grepl("XSI|XSS", Portfolio))}, c(1:12))
+box <- Map(function(x) {filter(box[[x]], grepl("DM", Portfolio))}, c(1:12))
+box <- mapply(cbind, box, "Period"=Period, SIMPLIFY=F)
+box <- do.call(rbind, box)
+LookBack <- c("j3", "j6", "j9", "j12", "j16")
+box <- Map(function(x) {filter(box, grepl(x, Portfolio))}, LookBack)
+box <- mapply(cbind, box, "LookBack"=LookBack, SIMPLIFY=F)
+box <- do.call(rbind, box)
+LookBack2 <- c("DM3", "DM6", "DM9", "DM12", "DM16")
+box <- Map(function(x) {filter(box, grepl(x, Portfolio))}, LookBack2)
+box <- mapply(cbind, box, "LookBack2"=LookBack2, SIMPLIFY=F)
+box <- do.call(rbind, box) 
+Portfolio <- c("P1","P2", "P3","P4","P5","P6", "P7","P8", "P9","Pten")
+box <- Map(function(x) {filter(box, grepl(x, Portfolio))}, Portfolio)
+box <- mapply(cbind, box, "TopTrading"=Portfolio, SIMPLIFY=F)
+box <- do.call(rbind, box) 
+Type <- c("XSI","XSS")
+box <- Map(function(x) {filter(box, grepl(x, Portfolio))}, Type)
+box <- mapply(cbind, box, "Type"=Type, SIMPLIFY=F)
+box <- do.call(rbind, box) 
+Weighting <- c("ew","vw")
+box <- Map(function(x) {filter(box, grepl(x, Portfolio))}, Weighting)
+box <- mapply(cbind, box, "Weighting"=Weighting, SIMPLIFY=F)
+box <- do.call(rbind, box)
+rownames(box) <- NULL
+box <- tbl_df(box)
+##Construct diagram to show that LB12 and ew Is a decent choice. (FIGURE 1) 
+boxsub <- filter(box, Weighting == "vw", Type == "XSI", LookBack == "j12")
+g <- ggplot(boxsub, aes(x=TopTrading, y=AnnSP)) +
+    geom_blank()+
+    geom_boxplot() +
+    facet_grid(LookBack2~.)
+g <- g+coord_cartesian(ylim=c(0,2.5))
+g <- g+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g <- g + theme(panel.background = element_blank())
+g <- g+ theme(axis.line = element_line(colour = "black"))
+g <- g+ theme_bw()
+g <- g+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+##SHOW DMI LONGER PERIODS_. (FIGURE 1) #
+boxsub1 <- filter(box, Type == "XSI", Period %in% target,Weighting == "vw", LookBack == "j12")
+g1 <- ggplot(boxsub1, aes(x=TopTrading, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~LookBack2) +
+    geom_hline(data = BMvw, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g1 <- g1 +coord_cartesian(ylim=c(-0.5,2.5)) #do not use +ylim() here
+g1 <- g1 + geom_hline(data = BMvw1, color = "red", aes(yintercept = AnnSP), linetype = "dotted")
+g1 <- g1 + geom_line()
+g1 <- g1+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g1 <- g1 + theme(panel.background = element_blank())
+g1 <- g1+ theme(axis.line = element_line(colour = "black"))
+g1 <- g1+ theme_bw()
+g1 <- g1+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+#SHOW XSI SHORTER PERIODS_. (FIGURE 1) 
+boxsub1 <- filter(box, Type == "XSI", Period %in% target2,Weighting == "vw", LookBack == "j12")
+g1 <- ggplot(boxsub1, aes(x=TopTrading, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~LookBack2) +
+    geom_hline(data = BMvw2, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g1 <- g1 +coord_cartesian(ylim=c(-0.5,2.5)) #do not use +ylim() here
+g1 <- g1 + geom_line()
+g1 <- g1+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g1 <- g1 + theme(panel.background = element_blank())
+g1 <- g1+ theme(axis.line = element_line(colour = "black"))
+g1 <- g1+ theme_bw()
+g1 <- g1+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+g1 <- g1+ geom_path()
+##ROBUSTNESS TESTS DUAL-MOMENTUM (XSS)
+boxsub <- filter(box, Weighting == "vw", Type == "XSS")
+g <- ggplot(boxsub, aes(x=TopTrading, y=AnnSP)) +
+    geom_blank()+
+    geom_boxplot() +
+    facet_grid(LookBack~.)
+g <- g+coord_cartesian(ylim=c(0,2.5))
+g <- g+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g <- g + theme(panel.background = element_blank())
+g <- g+ theme(axis.line = element_line(colour = "black"))
+g <- g+ theme_bw()
+g <- g+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+##SHOW DMI LONGER PERIODS_. (FIGURE 1) #
+boxsub1 <- filter(box, Type == "XSS", Period %in% target,Weighting == "vw", LookBack == "j12")
+g1 <- ggplot(boxsub1, aes(x=TopTrading, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~LookBack2) +
+    geom_hline(data = BMvw, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g1 <- g1 +coord_cartesian(ylim=c(-0.5,2.5)) #do not use +ylim() here
+g1 <- g1 + geom_hline(data = BMvw1, color = "red", aes(yintercept = AnnSP), linetype = "dotted")
+g1 <- g1 + geom_line()
+g1 <- g1+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g1 <- g1 + theme(panel.background = element_blank())
+g1 <- g1+ theme(axis.line = element_line(colour = "black"))
+g1 <- g1+ theme_bw()
+g1 <- g1+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+##SHOW XSI SHORTER PERIODS_. (FIGURE 1) 
+boxsub1 <- filter(box, Type == "XSS", Period %in% target2,Weighting == "vw", LookBack == "j12")
+g1 <- ggplot(boxsub1, aes(x=TopTrading, y=AnnSP)) +
+    geom_point(size = 1)+
+    facet_grid(Period~LookBack2) +
+    geom_hline(data = BMvw2, aes(yintercept = AnnSP), colour = "Red", size = 0.5, linetype = "dotted")
+g1 <- g1 +coord_cartesian(ylim=c(-0.5,2.5)) #do not use +ylim() here
+g1 <- g1 + geom_line()
+g1 <- g1+ scale_x_discrete(name="") + scale_y_continuous(name="Sharpe-Ratio")
+g1 <- g1 + theme(panel.background = element_blank())
+g1 <- g1+ theme(axis.line = element_line(colour = "black"))
+g1 <- g1+ theme_bw()
+g1 <- g1+ theme(strip.background = element_rect(fill = "white", size = 0.3))
+g1 <- g1+ geom_path()
+
+#performance-analytics-new
+##XSI
+##XSI P1, j 3 til 16 vs benchmark 
+d <- all[,grepl("P1",colnames(all))]
+d <- d[, grepl("XSI", colnames(d))]
+d <- d[, !grepl("DM|ew", colnames(d))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+d <- cbind(d2,d)
+colnames(d) <- c("Benchmark(vw)", "P1,j=3", "P1,j=6", "P1,j=9", "P1,j=12", "P1,j=16")
+chart.CumReturns(d[-c(1),], wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = tol6qualitative, main = "", ylim = c(1, 2e4), ylog = TRUE, ylab = "", lwd = c(2.5,c(rep(1.5, 5)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol6qualitative, main = "", lwd = c(2.5,c(rep(1.5, 5)),3))
+##XSI P1-P1, j = 12 vs benchmark 
+d <- all[,grepl("j12",colnames(all))]
+d <- d[, grepl("XSI", colnames(d))]
+d <- d[, !grepl("DM|ew", colnames(d))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+d <- cbind(d2,d)
+colnames(d) <- c("vw", "P1", "P2", "P3", "P4", "P5","P6", "P7", "P8", "P9", "P10")
+chart.CumReturns(d[-c(1),], wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = tol12qualitative, main = "", ylim = c(0.3, 2e4), ylog = TRUE, ylab = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol12qualitative, main = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+##XSS
+##XSS P1, j 3 til 16 vs benchmark 
+layout(rbind(c(1)))
+d <- all[,grepl("P1",colnames(all))]
+d <- d[, grepl("XSS", colnames(d))]
+d <- d[, !grepl("DM|ew", colnames(d))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+d <- cbind(d2,d)
+colnames(d) <- c("Benchmark(vw)", "P1,j=3", "P1,j=6", "P1,j=9", "P1,j=12", "P1,j=16")
+chart.CumReturns(d[-c(1),], wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = tol6qualitative, main = "", ylim = c(1, 2e4), ylog = TRUE, ylab = "", lwd = c(2.5,c(rep(1.5, 5)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol6qualitative, main = "", lwd = c(2.5,c(rep(1.5, 5)),3))
+##XSI P1-P1, j = 12 vs benchmark 
+d <- all[,grepl("j12",colnames(all))]
+d <- d[, grepl("XSS", colnames(d))]
+d <- d[, !grepl("DM|ew", colnames(d))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+d <- cbind(d2,d)
+colnames(d) <- c("vw", "P1", "P2", "P3", "P4", "P5","P6", "P7", "P8", "P9", "P10")
+chart.CumReturns(d[-c(1),], wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = tol12qualitative, main = "", ylim = c(0.3, 2e4), ylog = TRUE, ylab = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol12qualitative, main = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+##STATISTICAL ANALYSIS
+##COMPARE DISTRIBUTIONS NORMALITY TESTS BENCHMARK VW. 
+kkk <- function(x) {
+layout(rbind(c(1,2),c(3,4)))
+chart.Histogram(d[,x], methods = NULL)
+chart.Histogram(d[,x], breaks = 40, methods = c("add.density", "add.normal"))
+chart.Histogram(d[,x], breaks = 40, methods = c("add.centered", "add.rug"))
+chart.Histogram(d[,x], breaks = 40, methods = c("add.risk")) }
+##COMPARE DISTRIBUTIONS NORMALITY TESTS BENCHMARK VW. 
+chart.Histogram(d[,5], methods = NULL)
+chart.Histogram(d[,5], breaks = 40, methods = c("add.density", "add.normal"))
+chart.Histogram(d[,5], breaks = 40, methods = c("add.centered", "add.rug"))
+chart.Histogram(d[,5], breaks = 40, methods = c("add.risk"))
+##SECTORS
+##Sectors BH 
+layout(rbind(c(1)))
+d <- all[,grepl("Energy|Material|Industry|ConsDisc|ConsStapl|Health|Finance|IT|Telecom|Utilities",colnames(all))]
+d <- d[, grepl("vw", colnames(d))]
+d <- d[, !grepl("DM", colnames(d))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+d <- cbind(d2,d)
+chart.CumReturns(d[-c(1),], wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = tol12qualitative, main = "", ylim = c(0.2, 1100), ylog = TRUE, ylab = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol12qualitative, main = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+##Sectors DM12BH 
+d <- all[,grepl("Energy|Material|Industry|ConsDisc|ConsStapl|Health|Finance|IT|Telecom|Utilities",colnames(all))]
+d <- d[, grepl("vw", colnames(d))]
+d <- d[, grepl("DM12", colnames(d))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+d <- cbind(d2,d)
+chart.CumReturns(d[-c(1),], wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = tol12qualitative, main = "", ylim = c(0.2, 1100), ylog = TRUE, ylab = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol12qualitative, main = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol12qualitative, main = "", lwd = c(2.5,c(rep(1.5, 10)),3), ylim = c(-0.8,0))
+##MARKET_PORTFOLIOS
+d<- all[,grepl("\\bvw\\b|\\bew\\b|\\bDM3vw\\b|\\bDM6vw\\b|\\bDM9vw\\b|\\bDM12vw\\b|\\bDM16vw\\b|\\bDM3ew\\b|\\bDM6ew\\b|\\bDM9ew\\b|\\bDM12ew\\b|\\bDM16ew\\b", colnames(all))]
+d <- d[,grepl("vw", colnames(d))]
+chart.CumReturns(d[-c(1),], wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = tol6qualitative, main = "", ylim = c(0.8, 5000), ylog = TRUE, ylab = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol6qualitative, main = "", ylim = c(-0.5,0))
+##DUAL_MOMENTUM
+1
+d <- all[,grepl("P1",colnames(all))]
+d <- d[, grepl("XSI", colnames(d))]
+d <- d[, !grepl("DM|ew", colnames(d))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+d <- cbind(d2,d)
+colnames(d) <- c("Benchmark(vw)", "P1,j=3", "P1,j=6", "P1,j=9", "P1,j=12", "P1,j=16")
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol6qualitative, main = "", lwd = c(2.5,c(rep(1.5, 5)),3))
+2
+##DM12XSIJ12
+tol11qualitative=c("#332288", "#6699CC", "#88CCEE", "#44AA99", "#117733", "#999933", "#DDCC77", "#661100", "#CC6677", "#882255", "#AA4499")
+d <- all[, grepl("XSI", colnames(all))]
+d <- d[, grepl("j12", colnames(d))]
+d <- d[, grepl("DM12", colnames(d))]
+d <- d[, !grepl("ew", colnames(d))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+d <- cbind(d2,d)
+chart.CumReturns(d, wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = tol11qualitative, main = "", ylim = c(1, 1e5), ylog = TRUE, ylab = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol11qualitative, main = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+##DM12XSSJ12
+tol11qualitative=c("#332288", "#6699CC", "#88CCEE", "#44AA99", "#117733", "#999933", "#DDCC77", "#661100", "#CC6677", "#882255", "#AA4499")
+d <- all[, grepl("XSS", colnames(all))]
+d <- d[, grepl("j12", colnames(d))]
+d <- d[, grepl("DM12", colnames(d))]
+d <- d[, !grepl("ew", colnames(d))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+d <- cbind(d2,d)
+chart.CumReturns(d, wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = tol11qualitative, main = "", ylim = c(1, 1e5), ylog = TRUE, ylab = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol11qualitative, main = "", lwd = c(2.5,c(rep(1.5, 10)),3))
+##SUMMARY
+tol10qualitative=c("#332288", "#88CCEE", "#44AA99", "#117733", "#999933", "#DDCC77", "#661100", "#CC6677", "#882255", "#AA4499")
+d <- all[, grepl("XSS|XSI", colnames(all))]
+d <- d[, grepl("j12", colnames(d))]
+d <- d[, !grepl("ew", colnames(d))]
+d <- d[, grepl("DM12|DM3", colnames(d))]
+d <- d[, grepl("P1", colnames(d))]
+d2<- all[,grepl("\\bvw\\b|\\bew\\b|\\bDM3vw\\b|\\bDM12vw\\b|\\bDM3ew\\b|\\bDM12ew\\b", colnames(all))]
+d <- cbind(d2, d)
+chart.CumReturns(d, wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = tol10qualitative, main = "", ylim = c(1, 1e6), ylog = TRUE, ylab = "", lwd = c(2.5,c(rep(1.5, 13)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = tol10qualitative, main = "", lwd = c(2.5,c(rep(1.5, 9)),3))
+d.length <- dim(d)[1]
+trailing36.rows <- ((d.length - 35):d.length)
+RISK_RETURN SPACE-
+> layout(rbind(c(1)))
+chart.RiskReturnScatter(d, Rf=Rf[[1]], main =, colorset=tol10qualitative, xlim = c(0,0.6), ylab = "")
+write.csv(table.CAPM(d[,-c(1)], d[,1], Rf = Rf[[1]], digits = 3), "CAPM.csv")
+Monthly returns 
+write.csv(t(table.CalendarReturns(d[,1])), "a1.csv")
+write.csv(t(table.CalendarReturns(d[,2])), "a2.csv")
+write.csv(t(table.CalendarReturns(d[,2])), "a3.csv")
+write.csv(t(table.CalendarReturns(d[,2])), "a2.csv")
+###SISTE
+##XSI
+##XSI P1, j 3 til 16 vs benchmark 
+d <- all[,grepl("P1",colnames(all))]
+d <- d[, grepl("XSI", colnames(d))]
+d <- d[, !grepl("DM|ew", colnames(d))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+d <- cbind(d2,d)
+colnames(d) <- c("Benchmark(vw)", "P1,j=3", "P1,j=6", "P1,j=9", "P1,j=12", "P1,j=16")
+##XSI P1-P1, j = 12 vs benchmark 
+dx <- all[,grepl("j12",colnames(all))]
+dx <- dx[, grepl("XSI", colnames(dx))]
+dx <- dx[, !grepl("DM|ew", colnames(dx))]
+d2 <- all[,grepl("\\bvw\\b",colnames(all))]
+dx <- cbind(d2,dx)
+colnames(dx) <- c("vw", "P1", "P2", "P3", "P4", "P5","P6", "P7", "P8", "P9", "P10")
+**CHARTS
+nf <- layout(matrix(c(1,2,3,4),2,2,byrow=TRUE), heights=c(6,2), TRUE)
+chart.CumReturns(dx[-c(1),], wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = viridis(12), main = "", ylim = c(0.3, 2e4), ylog = TRUE, ylab = "", lwd = c(3.5,c(rep(1.5, 10)),3))
+chart.CumReturns(d[-c(1),], wealth.index = TRUE, legend.loc = "topleft", cex.legend = 0.8, colorset = viridis(6), main = "", ylim = c(1, 2e4), ylog = TRUE, ylab = "", lwd = c(3.5,c(rep(1.5, 5)),3))
+chart.Drawdown(dx, geometric = TRUE, legend.loc = NULL, colorset = viridis(12), main = "", lwd = c(3.5,c(rep(1.5, 10)),3))
+chart.Drawdown(d, geometric = TRUE, legend.loc = NULL, colorset = viridis(6), main = "", lwd = c(3.5,c(rep(1.5, 5)),3))
+
+#regressions-new
+
+##P1-P10 XSI LB12evw og  LBN. (vw). TABLE 3
+csiplbn <- all[, grepl("XSI", colnames(all))]
+csiplbn <- csiplbn[, grepl("j12", colnames(csiplbn))]
+csiplbn <- csiplbn[, !grepl("DM|ew", colnames(csiplbn))]
+csiplbn <- do.call(cbind, Map(function(x) {csiplbn[,x] - all[,1]}, c(1:10)))
+csiplbn <- data.frame(coredata(csiplbn))
+RegFunc <- function(x) {
+    mod <- lm(x ~ vw + SMB + HML + PR1YR  + LIQ, data = dt)
+}
+o <- apply(csiplbn, 2, RegFunc)
+o <- list(o[c(1:10)])
+csiplbn <- Map(function(X,Y) {stargazer(o[X], type = "text", report = "vct*", out= Y)}, c(1), c("X2.html"))
+csiplbn <- Map(function(X,Y) {stargazer(o[X], type = "text", dep.var.labels.include = FALSE, float = FALSE, column.sep.width = "1pt", omit.stat = c("rsq", "chi2", "f", "ser"), model.numbers = FALSE, style = "jpam", column.labels = paste("P", rep(c(1:10),2),rep(c("vw", "ew"), each = 10), sep = ""), font.size = "small", omit.table.layout = "n", out= Y)}, c(1), c("X1.html"))
+##P1-P10 XSS LB12ew og P1/P2 LBN. (ew). TABLE 4
+csiplbn <- all[, grepl("XSS", colnames(all))]
+csiplbn <- csiplbn[, grepl("j12", colnames(csiplbn))]
+csiplbn <- csiplbn[, !grepl("DM|ew", colnames(csiplbn))]
+csiplbn <- do.call(cbind, Map(function(x) {csiplbn[,x] - all[,1]}, c(1:10)))
+csiplbn <- data.frame(coredata(csiplbn))
+RegFunc <- function(x) {
+    mod <- lm(x ~ vw + SMB + HML + PR1YR  + LIQ , data = dt)
+}
+o <- apply(csiplbn, 2, RegFunc)
+o <- list(o[c(1:10)])
+csiplbn <- Map(function(X,Y) {stargazer(o[X], type = "text", report = "vct*", out= Y)}, c(1), c("X3.html"))
+##MARKET_PORTFOLIOS
+d<- all[,grepl("\\bvw\\b|\\bew\\b|\\bDM3vw\\b|\\bDM6vw\\b|\\bDM9vw\\b|\\bDM12vw\\b|\\bDM16vw\\b|\\bDM3ew\\b|\\bDM6ew\\b|\\bDM9ew\\b|\\bDM12ew\\b|\\bDM16ew\\b", colnames(all))]
+d <- d[,grepl("DM", colnames(d))]
+csiplbn <- d
+RegFunc <- function(x) {
+    mod <- lm(x ~ vw + SMB + HML + PR1YR  + LIQ , data = dt)
+}
+o <- apply(csiplbn, 2, RegFunc)
+o <- list(o[c(1:10)])
+csiplbn <- Map(function(X,Y) {stargazer(o[X], type = "text", report = "vct*", out= Y)}, c(1), c("X4.html"))
+##DM12XSIJ12
+csiplbn <- all[, grepl("XSI", colnames(all))]
+csiplbn <- csiplbn[, grepl("j12", colnames(csiplbn))]
+csiplbn <- csiplbn[, grepl("DM12", colnames(csiplbn))]
+csiplbn <- csiplbn[, !grepl("ew", colnames(csiplbn))]
+csiplbn <- do.call(cbind, Map(function(x) {csiplbn[,x] - all[,1]}, c(1:10)))
+csiplbn <- data.frame(coredata(csiplbn))
+RegFunc <- function(x) {
+    mod <- lm(x ~ vw + SMB + HML + PR1YR  + LIQ, data = dt)
+}
+o <- apply(csiplbn, 2, RegFunc)
+o <- list(o[c(1:10)])
+csiplbn <- Map(function(X,Y) {stargazer(o[X], type = "text", report = "vct*", out= Y)}, c(1), c("X5.html"))
+##DM12XSIJ12
+csiplbn <- all[, grepl("XSS", colnames(all))]
+csiplbn <- csiplbn[, grepl("j12", colnames(csiplbn))]
+csiplbn <- csiplbn[, grepl("DM12", colnames(csiplbn))]
+csiplbn <- csiplbn[, !grepl("ew", colnames(csiplbn))]
+csiplbn <- do.call(cbind, Map(function(x) {csiplbn[,x] - all[,1]}, c(1:10)))
+csiplbn <- data.frame(coredata(csiplbn))
+RegFunc <- function(x) {
+    mod <- lm(x ~ vw + SMB + HML + PR1YR  + LIQ, data = dt)
+}
+o <- apply(csiplbn, 2, RegFunc)
+o <- list(o[c(1:10)])
+csiplbn <- Map(function(X,Y) {stargazer(o[X], type = "text", report = "vct*", out= Y)}, c(1), c("X6.html"))
+
+
+###Det er en god del kode som er utelatt her. Men fokus får bli å rydde opp i dette. Har slettet resten av den gamle koden i evernote/R
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
