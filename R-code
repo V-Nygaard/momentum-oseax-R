@@ -1,4 +1,31 @@
-#Laste-inn-kjernedata
+#packages
+install.packages("zoo")
+install.packages("TTR")
+install.packages("xts")
+install.packages("quantmod")
+install.packages("tidyr")
+install.packages("dplyr") 
+install.packages("PerformanceAnalytics")
+install.packages("FinancialInstrument") 
+install.packages("stargazer")
+install.packages("ggplot2")
+install.packages("grid")
+install.packages("gridExtra")
+library(zoo)
+library(TTR)
+library(xts)
+library(quantmod)
+library(data.table)
+library(PerformanceAnalytics)
+library(FinancialInstrument)
+library(stargazer)
+library(dplyr)
+library(ggplot2)
+library(grid)
+library(gridExtra)
+library(tidyr)
+
+#Load core data
 RI <- read.csv("RI.csv", header = TRUE) 
 RI$Date <- as.Date(RI$Date, "%d/%m/%Y")
 MC <- read.csv("MC.csv", header = TRUE) 
@@ -449,33 +476,6 @@ pm <- Map(function(x) {as.data.frame(x, row.names = NULL)}, PM)
 pm <- Map(function(x) {cbind(colnames(all), pm[[x]])}, c(1:12))
 for (i in 1:12) {colnames(pm[[i]]) <- c("Portfolio", "mSD", "Skew", "Kurt", "ExKurt", "SSkew", "SExKurt", "CumRet", "AnnRet", "AnnSD", "AnnSP", "WorstDD", "Omega", "SOR", "Kappa3", "UpPot", "IR")}
 pm <- Map(function(x) {tbl_df(pm[[x]])}, c(1:12))
-
-#packages
-install.packages("zoo")
-install.packages("TTR")
-install.packages("xts")
-install.packages("quantmod")
-install.packages("tidyr")
-install.packages("dplyr") 
-install.packages("PerformanceAnalytics")
-install.packages("FinancialInstrument") 
-install.packages("stargazer")
-install.packages("ggplot2")
-install.packages("grid")
-install.packages("gridExtra")
-library(zoo)
-library(TTR)
-library(xts)
-library(quantmod)
-library(data.table)
-library(PerformanceAnalytics)
-library(FinancialInstrument)
-library(stargazer)
-library(dplyr)
-library(ggplot2)
-library(grid)
-library(gridExtra)
-library(tidyr)
 
 #box-plot-robustness-test
 ##Construct Benchmark Performance 
@@ -1035,10 +1035,6 @@ RegFunc <- function(x) {
 o <- apply(csiplbn, 2, RegFunc)
 o <- list(o[c(1:10)])
 csiplbn <- Map(function(X,Y) {stargazer(o[X], type = "text", report = "vct*", out= Y)}, c(1), c("X6.html"))
-
-
-###Det er en god del kode som er utelatt her. Men fokus får bli å rydde opp i dette. Har slettet resten av den gamle koden i evernote/R
-
 
 
 
